@@ -47,7 +47,8 @@ export default function SignIn() {
     console.log("Sign in values:", values);
 
     // TODO: call the auth API with values.email / values.password,
-    // then router.replace() to the first screen after sign in.
+    // and only continue once it succeeds.
+    router.replace("/explore");
   });
 
   return (

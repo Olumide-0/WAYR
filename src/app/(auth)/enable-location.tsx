@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
@@ -29,10 +30,33 @@ function LocationPin() {
 }
 
 export default function EnableLocation() {
+  const router = useRouter();
+
+  // New users see this right after sign up and can skip it ("Maybe Later").
+  // From Explore -> View Map (location still off) it is required: no skip button.
+  const { required, placeId } = useLocalSearchParams<{ required?: string; placeId?: string }>();
+  const isRequired = required === "1";
+
   const [requesting, setRequesting] = useState(false);
 
-  const goNext = () => {
-    // TODO: router.replace() to the home screen.
+  const onEnabled = () => {
+    if (isRequired && placeId) {
+      // Came from "Validate Visit": go back to that landmark with the route map open.
+      router.dismissTo({ pathname: "/detail", params: { id: placeId, route: "1" } });
+      return;
+    }
+
+    if (isRequired) {
+      // Location is on now: go back to Explore and open its map section.
+      router.dismissTo({ pathname: "/explore", params: { map: "1" } });
+      return;
+    }
+
+    router.replace("/explore");
+  };
+
+  const onSkip = () => {
+    router.replace("/explore");
   };
 
   const onEnable = async () => {
@@ -44,7 +68,7 @@ export default function EnableLocation() {
       console.log("Location permission:", status);
 
       if (status === "granted") {
-        goNext();
+        onEnabled();
         return;
       }
 
@@ -65,6 +89,7 @@ export default function EnableLocation() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <Stack.Screen options={{ gestureEnabled: !isRequired }} />
       <StatusBar style="dark" />
 
       <View style={styles.body}>
@@ -85,13 +110,15 @@ export default function EnableLocation() {
       <View style={styles.footer}>
         <Button title="Enable Location" onPress={onEnable} style={styles.primary} />
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={goNext}
-          style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
-        >
-          <Text style={styles.secondaryLabel}>Maybe Later</Text>
-        </Pressable>
+        {isRequired ? null : (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onSkip}
+            style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+          >
+            <Text style={styles.secondaryLabel}>Maybe Later</Text>
+          </Pressable>
+        )}
       </View>
     </SafeAreaView>
   );
