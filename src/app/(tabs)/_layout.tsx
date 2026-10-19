@@ -7,6 +7,10 @@ export default function TabsLayout() {
   // "Nearby places" and "Detail" are hidden tabs, so keep "Explore" highlighted on them.
   const segments = useSegments() as string[];
   const onExploreFlow = segments.includes("nearby") || segments.includes("detail");
+  // The reward detail page is a hidden tab too, so keep "Rewards" highlighted on it.
+  const onRewardFlow = segments.includes("reward");
+  // Edit Profile and Settings are hidden tabs, so keep "Profile" highlighted on them.
+  const onProfileFlow = segments.includes("edit-profile") || segments.includes("settings");
 
   return (
     <Tabs
@@ -32,10 +36,14 @@ export default function TabsLayout() {
       />
       <Tabs.Screen name="nearby" options={{ href: null }} />
       <Tabs.Screen name="detail" options={{ href: null }} />
+      <Tabs.Screen name="reward" options={{ href: null }} />
+      <Tabs.Screen name="edit-profile" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen
         name="rewards"
         options={{
           title: "Rewards",
+          tabBarInactiveTintColor: onRewardFlow ? colors.brand : colors.black,
           tabBarIcon: ({ color }) => <Gift size={22} strokeWidth={1.5} color={color} />,
         }}
       />
@@ -50,6 +58,7 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: "Profile",
+          tabBarInactiveTintColor: onProfileFlow ? colors.brand : colors.black,
           tabBarIcon: ({ color }) => <User size={22} strokeWidth={1.5} color={color} />,
         }}
       />

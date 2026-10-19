@@ -16,8 +16,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 import Button from "../../components/Button";
+import RewardSuccess from "../../components/detail/RewardSuccess";
+import ValidateSheet from "../../components/detail/ValidateSheet";
+import ValidatingVisit from "../../components/detail/ValidatingVisit";
 import RouteMap from "../../components/map/RouteMap";
 import { ALL_PLACES } from "../../constants/places";
+import { earnPoints } from "../../store/wallet";
 import { colors } from "../../constants/theme";
 
 const HERO_HEIGHT = 380;
@@ -31,6 +35,24 @@ export default function Detail() {
 
   const [saved, setSaved] = useState(false);
   const [showRoute, setShowRoute] = useState(route === "1");
+  // Points to award when "Ready to validate" is open; null when it is closed.
+  const [readyPoints, setReadyPoints] = useState<number | null>(null);
+  // After "Validate now": loading screen, then the reward screen.
+  const [phase, setPhase] = useState<"idle" | "validating" | "success">("idle");
+  const [awardedPoints, setAwardedPoints] = useState(0);
+
+  const placeName = ALL_PLACES.find((item) => item.id === id)?.name;
+
+  // TODO: replace this fake delay with the real validation API call.
+  useEffect(() => {
+    if (phase !== "validating") return;
+    const timer = setTimeout(() => {
+      // Credit the wallet, then show the reward screen.
+      earnPoints(`Visited ${placeName ?? "landmark"}`, awardedPoints);
+      setPhase("success");
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [phase, placeName, awardedPoints]);
 
   // This screen stays mounted between places, so reset it when the place changes.
   useEffect(() => {
@@ -39,6 +61,8 @@ export default function Detail() {
 
   useEffect(() => {
     setSaved(false);
+    setReadyPoints(null);
+    setPhase("idle");
   }, [id]);
 
   const closeRoute = () => {
@@ -91,7 +115,40 @@ export default function Detail() {
     setShowRoute(true);
   };
 
-  if (showRoute) return <RouteMap place={place} onClose={closeRoute} />;
+  // Reached (or tapped) the final landmark: back to this page with "Ready to validate".
+  const onArrive = (bonusPoints: number) => {
+    closeRoute();
+    setReadyPoints(place.points + bonusPoints);
+  };
+
+  const validateNow = () => {
+    // TODO: confirm the user is within range and send readyPoints to the API.
+    setAwardedPoints(readyPoints ?? place.points);
+    setReadyPoints(null);
+    setPhase("validating");
+  };
+
+  if (phase === "validating") return <ValidatingVisit />;
+
+  if (phase === "success") {
+    return (
+      <RewardSuccess
+        points={awardedPoints}
+        onExploreMore={() => {
+          setPhase("idle");
+          router.navigate("/explore");
+        }}
+        onViewWallet={() => {
+          setPhase("idle");
+          router.navigate("/wallet");
+        }}
+      />
+    );
+  }
+
+  if (showRoute) {
+    return <RouteMap place={place} onClose={closeRoute} onArrive={onArrive} />;
+  }
 
   return (
     <View style={styles.screen}>
@@ -204,6 +261,15 @@ export default function Detail() {
           />
         </View>
       </ScrollView>
+
+      {readyPoints !== null ? (
+        <ValidateSheet
+          place={place}
+          points={readyPoints}
+          onValidate={validateNow}
+          onClose={() => setReadyPoints(null)}
+        />
+      ) : null}
     </View>
   );
 }

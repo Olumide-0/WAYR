@@ -4,42 +4,32 @@ import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, Defs, LinearGradient, Path, Stop } from "react-native-svg";
 
 import Button from "../../components/Button";
+import LocationPin from "../../components/LocationPin";
 import { colors } from "../../constants/theme";
-
-function LocationPin() {
-  return (
-    <Svg width={84} height={132} viewBox="0 0 60 94">
-      <Defs>
-        <LinearGradient id="pinGradient" x1="0.2" y1="0" x2="0.8" y2="1">
-          <Stop offset="0" stopColor="#54EEDE" />
-          <Stop offset="1" stopColor="#2584CB" />
-        </LinearGradient>
-      </Defs>
-
-      <Path
-        d="M30 94 C30 94 0 58 0 30 A30 30 0 1 1 60 30 C60 58 30 94 30 94 Z"
-        fill="url(#pinGradient)"
-      />
-      <Circle cx={30} cy={34} r={12} fill={colors.white} />
-      <Circle cx={30} cy={78} r={4} fill={colors.white} />
-    </Svg>
-  );
-}
 
 export default function EnableLocation() {
   const router = useRouter();
 
   // New users see this right after sign up and can skip it ("Maybe Later").
   // From Explore -> View Map (location still off) it is required: no skip button.
-  const { required, placeId } = useLocalSearchParams<{ required?: string; placeId?: string }>();
+  const { required, placeId, rewardId } = useLocalSearchParams<{
+    required?: string;
+    placeId?: string;
+    rewardId?: string;
+  }>();
   const isRequired = required === "1";
 
   const [requesting, setRequesting] = useState(false);
 
   const onEnabled = () => {
+    if (isRequired && rewardId) {
+      // Came from "Get Directions" on a reward: back to it with the route map open.
+      router.dismissTo({ pathname: "/reward", params: { id: rewardId, route: "1" } });
+      return;
+    }
+
     if (isRequired && placeId) {
       // Came from "Validate Visit": go back to that landmark with the route map open.
       router.dismissTo({ pathname: "/detail", params: { id: placeId, route: "1" } });

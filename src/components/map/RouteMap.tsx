@@ -18,7 +18,10 @@ const VISIT_RADIUS_M = 50;
 // Only join the user's dot to the route when they are reasonably close to it.
 const MAX_ROUTE_START_M = 20000;
 
-const toLatLng = ([longitude, latitude]: [number, number]): LatLng => ({ latitude, longitude });
+const toLatLng = ([longitude, latitude]: [number, number]): LatLng => ({
+  latitude,
+  longitude,
+});
 
 // Straight-line distance in metres between two points.
 const distanceInMetres = (a: LatLng, b: LatLng) => {
@@ -27,24 +30,45 @@ const distanceInMetres = (a: LatLng, b: LatLng) => {
   const dLng = rad(b.longitude - a.longitude);
   const h =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLng / 2) ** 2;
+    Math.cos(rad(a.latitude)) *
+      Math.cos(rad(b.latitude)) *
+      Math.sin(dLng / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
 };
 
-function StopLabel({ stop, visited }: { stop: RouteStop; visited: boolean }) {
+function StopLabel({
+  stop,
+  visited,
+  directionsOnly,
+}: {
+  stop: RouteStop;
+  visited: boolean;
+  directionsOnly: boolean;
+}) {
+  const hint = directionsOnly
+    ? "Pick up your reward here"
+    : visited
+      ? "Visited"
+      : stop.isFinal
+        ? "Your Final Landmark"
+        : "Nearby place";
+
   return (
     <View style={styles.labelWrapper}>
       <View style={styles.label}>
-        <View style={styles.labelPoints}>
-          <Gem size={14} strokeWidth={1.75} color={colors.brand} />
-          <Text style={styles.labelPointsText}>{stop.points} Wpts</Text>
-        </View>
-        <Text style={styles.labelName} numberOfLines={1}>
+        {directionsOnly ? null : (
+          <View style={styles.labelPoints}>
+            <Gem size={14} strokeWidth={1.75} color={colors.brand} />
+            <Text style={styles.labelPointsText}>{stop.points} Wpts</Text>
+          </View>
+        )}
+        <Text
+          style={[styles.labelName, directionsOnly && styles.labelNameOnly]}
+          numberOfLines={1}
+        >
           {stop.place.name}
         </Text>
-        <Text style={styles.labelHint}>
-          {visited ? "Visited" : stop.isFinal ? "Your Final Landmark" : "Nearby place"}
-        </Text>
+        <Text style={styles.labelHint}>{hint}</Text>
       </View>
     </View>
   );
@@ -53,16 +77,33 @@ function StopLabel({ stop, visited }: { stop: RouteStop; visited: boolean }) {
 type RouteMapProps = {
   place: Place;
   onClose: () => void;
+  // Called once when the user reaches (or taps) the final landmark, with the bonus
+  // points from the nearby stops they visited on the way. Optional.
+  onArrive?: (bonusPoints: number) => void;
+  // Just directions (e.g. to a reward partner): only the destination, no points,
+  // no nearby stops and no check-ins. Spending happens with "Pay with Wpts".
+  directionsOnly?: boolean;
 };
 
 // "Get Directions" map shown on the detail page after "Validate Visit".
 // The final landmark gives its own points; each nearby stop on the way adds a bonus,
 // but only if the user actually visits it.
-export default function RouteMap({ place, onClose }: RouteMapProps) {
+export default function RouteMap({
+  place,
+  onClose,
+  onArrive,
+  directionsOnly = false,
+}: RouteMapProps) {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
 
-  const stops = useMemo(() => getRouteStops(place), [place]);
+  const stops = useMemo(
+    () =>
+      directionsOnly
+        ? [{ place, points: 0, isFinal: true }]
+        : getRouteStops(place),
+    [place, directionsOnly],
+  );
   const [visited, setVisited] = useState<string[]>([]);
   const [user, setUser] = useState<LatLng | null>(null);
   const [heading, setHeading] = useState(0);
@@ -74,8 +115,33 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
     .filter((stop) => visited.includes(stop.place.id))
     .reduce((sum, stop) => sum + stop.points, 0);
 
-  const markVisited = (id: string) =>
-    setVisited((current) => (current.includes(id) ? current : [...current, id]));
+  // Refs so the location watcher always sees the latest values.
+  const visitedRef = useRef<string[]>([]);
+  const arrivedRef = useRef(false);
+  const onArriveRef = useRef(onArrive);
+
+  useEffect(() => {
+    onArriveRef.current = onArrive;
+  }, [onArrive]);
+
+  const markVisited = (id: string) => {
+    if (visitedRef.current.includes(id)) return;
+    visitedRef.current = [...visitedRef.current, id];
+    setVisited(visitedRef.current);
+  };
+
+  const arrive = () => {
+    if (arrivedRef.current) return;
+    arrivedRef.current = true;
+
+    const bonus = stops
+      .filter(
+        (stop) => !stop.isFinal && visitedRef.current.includes(stop.place.id),
+      )
+      .reduce((sum, stop) => sum + stop.points, 0);
+
+    onArriveRef.current?.(bonus);
+  };
 
   // Follow the user, and check them in at any stop they get close to.
   useEffect(() => {
@@ -91,19 +157,31 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
         positionSub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.High, distanceInterval: 5 },
           ({ coords }) => {
-            const here = { latitude: coords.latitude, longitude: coords.longitude };
+            const here = {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+            };
             setUser(here);
 
+            // Directions only: nothing to check in or earn.
+            if (directionsOnly) return;
+
             stops.forEach((stop) => {
-              if (distanceInMetres(here, toLatLng(stop.place.coordinate)) <= VISIT_RADIUS_M) {
+              if (
+                distanceInMetres(here, toLatLng(stop.place.coordinate)) <=
+                VISIT_RADIUS_M
+              ) {
                 markVisited(stop.place.id);
+                if (stop.isFinal) arrive();
               }
             });
-          }
+          },
         );
 
         headingSub = await Location.watchHeadingAsync((value) => {
-          setHeading(value.trueHeading >= 0 ? value.trueHeading : value.magHeading);
+          setHeading(
+            value.trueHeading >= 0 ? value.trueHeading : value.magHeading,
+          );
         });
       } catch (error) {
         console.log("Could not watch the location:", error);
@@ -120,16 +198,29 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
       positionSub?.remove();
       headingSub?.remove();
     };
-  }, [stops]);
+  }, [stops, directionsOnly]);
 
   const stopCoordinates = stops.map((stop) => toLatLng(stop.place.coordinate));
   const userNearRoute =
-    user && distanceInMetres(user, stopCoordinates[0]) <= MAX_ROUTE_START_M ? user : null;
+    user && distanceInMetres(user, stopCoordinates[0]) <= MAX_ROUTE_START_M
+      ? user
+      : null;
 
   // TODO: replace the straight lines with a real walking route (directions API).
-  const route = userNearRoute ? [userNearRoute, ...stopCoordinates] : stopCoordinates;
+  const route = userNearRoute
+    ? [userNearRoute, ...stopCoordinates]
+    : stopCoordinates;
 
   const fitRoute = () => {
+    // A single point (e.g. directions with the user far away): just centre on it.
+    if (route.length < 2) {
+      mapRef.current?.animateToRegion(
+        { ...route[0], latitudeDelta: 0.01, longitudeDelta: 0.01 },
+        400,
+      );
+      return;
+    }
+
     mapRef.current?.fitToCoordinates(route, {
       edgePadding: { top: insets.top + 90, right: 190, bottom: 120, left: 50 },
       animated: true,
@@ -143,7 +234,11 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
       <MapView
         ref={mapRef}
         style={styles.map}
-        initialRegion={{ ...stopCoordinates[0], latitudeDelta: 0.02, longitudeDelta: 0.02 }}
+        initialRegion={{
+          ...stopCoordinates[0],
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        }}
         customMapStyle={MAP_STYLE}
         userInterfaceStyle="light"
         showsUserLocation={false}
@@ -168,9 +263,18 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
             coordinate={toLatLng(stop.place.coordinate)}
             anchor={{ x: 0.5, y: 1 }}
             zIndex={1}
-            // Dev only: tap a pin to pretend you've arrived, since the sample stops are
-            // in Melbourne. Real check-ins happen automatically by proximity.
-            onPress={__DEV__ ? () => markVisited(stop.place.id) : undefined}
+            // Tapping the final landmark opens "Ready to validate" (handy for testing).
+            // Dev only: tapping a nearby stop pretends you've visited it, since the sample
+            // stops are in Melbourne. Real check-ins happen automatically by proximity.
+            onPress={
+              directionsOnly
+                ? undefined
+                : stop.isFinal
+                  ? arrive
+                  : __DEV__
+                    ? () => markVisited(stop.place.id)
+                    : undefined
+            }
           >
             <MapPin name={stop.place.name} />
           </Marker>
@@ -184,7 +288,11 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
             zIndex={2}
             tappable={false}
           >
-            <StopLabel stop={stop} visited={visited.includes(stop.place.id)} />
+            <StopLabel
+              stop={stop}
+              visited={visited.includes(stop.place.id)}
+              directionsOnly={directionsOnly}
+            />
           </Marker>
         ))}
 
@@ -217,7 +325,11 @@ export default function RouteMap({ place, onClose }: RouteMapProps) {
         </View>
 
         {/* TODO: open the filters sheet. */}
-        <Pressable accessibilityRole="button" accessibilityLabel="Filters" style={styles.filter}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Filters"
+          style={styles.filter}
+        >
           <SlidersHorizontal size={20} strokeWidth={1.5} color={colors.ink} />
         </Pressable>
       </View>
@@ -309,6 +421,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
     color: colors.white,
+  },
+  labelNameOnly: {
+    marginTop: 0,
   },
   labelHint: {
     marginTop: 4,
